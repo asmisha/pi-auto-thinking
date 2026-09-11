@@ -1,6 +1,6 @@
 # pi-auto-thinking
 
-Private variant of [aesisify/pi-auto-thinking](https://github.com/aesisify/pi-auto-thinking),
+Fork of [aesisify/pi-auto-thinking](https://github.com/aesisify/pi-auto-thinking),
 based on 0.1.2. Includes Codex compatibility and additional trial logging;
 see [Local trial changes](#local-trial-changes). Original [MIT license](./LICENSE)
 and history are preserved. This variant is not published to npm.
@@ -21,9 +21,6 @@ The valid thinking levels are never hard-coded — they come from pi's
 levels the active model actually offers.
 
 ## Install
-
-Git must have access to this private repository. For HTTPS authentication with
-GitHub CLI, run `gh auth login` if needed, then `gh auth setup-git`.
 
 ```bash
 pi install git:github.com/asmisha/pi-auto-thinking
