@@ -1,8 +1,9 @@
 # pi-auto-thinking
 
-[![npm version](https://img.shields.io/npm/v/pi-auto-thinking.svg)](https://www.npmjs.com/package/pi-auto-thinking)
-[![Tests](https://github.com/aesisify/pi-auto-thinking/actions/workflows/test.yml/badge.svg)](https://github.com/aesisify/pi-auto-thinking/actions/workflows/test.yml)
-[![license: MIT](https://img.shields.io/npm/l/pi-auto-thinking.svg)](./LICENSE)
+Private variant of [aesisify/pi-auto-thinking](https://github.com/aesisify/pi-auto-thinking),
+based on 0.1.2. Includes Codex compatibility and additional trial logging;
+see [Local trial changes](#local-trial-changes). Original [MIT license](./LICENSE)
+and history are preserved. This variant is not published to npm.
 
 A [pi](https://pi.dev) extension that auto-sets the thinking level each turn via
 an **online prompt-difficulty classifier**. The idea is borrowed from
@@ -21,17 +22,15 @@ levels the active model actually offers.
 
 ## Install
 
-```bash
-pi install npm:pi-auto-thinking
-```
-
-Or from git:
+Git must have access to this private repository. For HTTPS authentication with
+GitHub CLI, run `gh auth login` if needed, then `gh auth setup-git`.
 
 ```bash
-pi install git:github.com/aesisify/pi-auto-thinking
+pi install git:github.com/asmisha/pi-auto-thinking
 ```
 
-> Published with SLSA provenance — verify with `npm audit signatures`.
+Do not also load the upstream npm package: that would register two classifiers.
+After installation, start a new pi session or run `/reload` in an existing one.
 
 ## Configure
 
@@ -41,22 +40,22 @@ Project-local config shadows user-global.
 - User:     `~/.pi/agent/pi-auto-thinking/config.json`
 - Project:  `<project>/.pi/pi-auto-thinking/config.json`
 
+For the same Luna configuration as the local trial, authenticate OpenAI Codex
+in pi and create `~/.pi/agent/pi-auto-thinking/config.json` with:
+
 ```json
 {
   "enabled": true,
-  "classifier": "ollama/qwen2.5:3b",
-  "classifierLevel": "off",
-  "minLevel": "low",
-  "maxLevel": "xhigh",
-  "timeoutMs": 8000,
-  "maxTokens": 512
+  "classifier": "openai-codex/gpt-5.6-luna"
 }
 ```
 
-`ollama/qwen2.5:3b` is recommended for a local [ollama](https://ollama.com)
-classifier — small and fast enough to rate each prompt near instantly, with no
-per-turn cost. Pull it with `ollama pull qwen2.5:3b`. Any cloud model
-(`anthropic/claude-haiku-4-5`, `openai/gpt-5-mini`, …) works too.
+Check that Luna is available with `pi --list-models luna`. Without a configured
+classifier, the extension is inactive. The omitted settings retain the upstream
+defaults below. Other classifiers can be selected with their `provider/model` ID.
+
+The Codex/Luna configuration was verified with pi 0.85.1. Upstream input eligibility
+is unchanged: RPC inputs and streaming follow-ups are skipped.
 
 | field             | default   | notes                                                 |
 | ----------------- | --------- | ---------------------------------------------------- |
