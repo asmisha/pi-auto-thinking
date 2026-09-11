@@ -9,6 +9,7 @@
 // If compat is removed upstream, swap to createModels() + provider factories.
 
 import {
+	type AssistantMessage,
 	clampThinkingLevel,
 	getSupportedThinkingLevels,
 } from "@earendil-works/pi-ai";
@@ -66,6 +67,9 @@ interface ClassifyResult {
 	range?: string[]; // the levels the classifier was offered
 	ms: number;
 	error?: string;
+	stopReason?: AssistantMessage["stopReason"];
+	usage?: AssistantMessage["usage"];
+	providerError?: string;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -200,6 +204,11 @@ export default function (pi: ExtensionAPI) {
 		const apiKey = await ctx.modelRegistry
 			.getApiKeyForProvider(provider)
 			.catch(() => undefined);
+		const redactError = (message: string) =>
+			(apiKey ? message.split(apiKey).join("[REDACTED]") : message).slice(
+				0,
+				1000,
+			);
 		const controller = new AbortController();
 		const timer = setTimeout(
 			() => controller.abort(),
@@ -224,10 +233,20 @@ export default function (pi: ExtensionAPI) {
 					apiKey,
 					maxTokens: cfg.maxTokens ?? DEFAULTS.maxTokens,
 					reasoning: cfg.classifierLevel as ReasoningLevel,
-					temperature: 0,
+					// Codex rejects temperature, even when reasoning is off.
+					...(classifierModel.api === "openai-codex-responses"
+						? {}
+						: { temperature: 0 }),
 					signal: controller.signal,
 				},
 			);
+			const telemetry = {
+				stopReason: res.stopReason,
+				usage: res.usage,
+				providerError: res.errorMessage
+					? redactError(res.errorMessage)
+					: undefined,
+			};
 			const blocks = res.content as Array<{
 				type: string;
 				text?: string;
@@ -246,6 +265,7 @@ export default function (pi: ExtensionAPI) {
 			const parsed = parseDifficulty(raw, range);
 			if (!parsed)
 				return {
+					...telemetry,
 					ok: false,
 					raw,
 					thinking,
@@ -253,10 +273,13 @@ export default function (pi: ExtensionAPI) {
 					kept: true,
 					range,
 					ms: Date.now() - t0,
-					error: `unparseable: ${JSON.stringify(raw).slice(0, 60)}`,
+					error:
+						telemetry.providerError ??
+						`unparseable: ${JSON.stringify(raw).slice(0, 60)}`,
 				};
 			if (parsed === "keep")
 				return {
+					...telemetry,
 					ok: true,
 					raw,
 					thinking,
@@ -268,6 +291,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			// parsed is already within range (model-valid + bounded) — no further clamp needed.
 			return {
+				...telemetry,
 				ok: true,
 				raw,
 				thinking,
@@ -286,7 +310,7 @@ export default function (pi: ExtensionAPI) {
 				kept: true,
 				range,
 				ms: Date.now() - t0,
-				error: err instanceof Error ? err.message : String(err),
+				error: redactError(err instanceof Error ? err.message : String(err)),
 			};
 		} finally {
 			clearTimeout(timer);
@@ -306,14 +330,28 @@ export default function (pi: ExtensionAPI) {
 		cfg = readConfig<Config>(DEFAULTS, ctx.cwd); // cheap re-read vs the LLM call; picks up edits
 		paint(ctx);
 
-		// Only classify real interactive turns; skip mid-stream steers, queued
-		// follow-ups, and extension-injected messages.
-		if (event.source !== "interactive" || event.streamingBehavior)
-			return { action: "continue" };
-		if (!active()) return { action: "continue" };
-		// Skip models that only offer "off" (non-reasoning) — nothing to set.
+		const metadata = {
+			sessionId: ctx.sessionManager.getSessionId(),
+			sessionFile: ctx.sessionManager.getSessionFile(),
+			parentEntryId: ctx.sessionManager.getLeafId(),
+			source: event.source,
+			hasUI: ctx.hasUI,
+			mainModel: ctx.model
+				? `${ctx.model.provider}/${ctx.model.id}`
+				: undefined,
+			classifier: cfg.classifier,
+			thinkingBefore: pi.getThinkingLevel(),
+		};
+		// Keep the upstream eligibility rules; log skips to measure actual coverage.
+		const skip = (reason: string) => {
+			logger().info("skipped", { ...metadata, reason });
+			return { action: "continue" as const };
+		};
+		if (event.source !== "interactive") return skip("non-interactive");
+		if (event.streamingBehavior) return skip("streaming");
+		if (!active()) return skip("disabled-or-unconfigured");
 		if (!ctx.model || getSupportedThinkingLevels(ctx.model).length <= 1)
-			return { action: "continue" };
+			return skip("non-reasoning");
 
 		const r = await classifyOnce(ctx, event.text, true);
 		if (r.skipped) {
@@ -333,17 +371,20 @@ export default function (pi: ExtensionAPI) {
 				: `fallback (kept): ${r.error}`,
 		};
 		lastMs = r.ms;
-		if (r.ok && !r.kept)
-			logger().info("classified", {
-				verdict: r.verdict,
-				level: r.level,
-				ms: r.ms,
-			});
+		const record = {
+			...metadata,
+			thinkingAfter: pi.getThinkingLevel(),
+			verdict: r.verdict,
+			ms: r.ms,
+			stopReason: r.stopReason,
+			usage: r.usage,
+			providerError: r.providerError,
+		};
+		if (r.ok && !r.kept) logger().info("classified", record);
 		else
 			logger().warn("kept", {
-				level: r.level,
+				...record,
 				reason: r.ok ? "keep verdict" : r.error,
-				ms: r.ms,
 			});
 		paint(ctx);
 		return { action: "continue" };

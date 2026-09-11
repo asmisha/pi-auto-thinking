@@ -54,6 +54,11 @@ export function buildFakeCtx(opts: FakeCtxOptions = {}) {
 		cwd: opts.model?.cwd ?? process.cwd(),
 		model: opts.model ?? { id: "fake/main", cwd: process.cwd() },
 		hasUI: false,
+		sessionManager: {
+			getSessionId: () => "test-session",
+			getSessionFile: () => "/tmp/test-session.jsonl",
+			getLeafId: () => "previous-entry",
+		},
 		ui: {
 			theme: undefined,
 			setWidget: () => {},

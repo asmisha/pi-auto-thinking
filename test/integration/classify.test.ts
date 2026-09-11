@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import ext from "../../src/extension/index.ts";
+import { getLogger } from "../../src/logger.ts";
 import { buildFakeCtx, buildFakePi } from "../support/fakes/pi.ts";
 import { __resetPiAi, __setPiAi } from "../support/fakes/pi-ai.ts";
 import {
@@ -110,6 +112,130 @@ describe("classify (happy path)", () => {
 		);
 		assert.equal(called, false);
 		__resetPiAi();
+	});
+
+	for (const api of ["openai-codex-responses", "openai-responses"]) {
+		it(`sends compatible temperature options for ${api}`, async () => {
+			let called = false;
+			__setCompleteSimple(async (_model, _context, options) => {
+				called = true;
+				if (api === "openai-codex-responses") {
+					assert.equal(Object.hasOwn(options as object, "temperature"), false);
+				} else {
+					assert.equal((options as { temperature: number }).temperature, 0);
+				}
+				return { content: [{ type: "text", text: "low" }] };
+			});
+			const pi = buildFakePi();
+			ext(pi as unknown as ExtensionAPI);
+			const ctx = buildFakeCtx({ classifier: { id: "classifier", api } });
+			ctx.cwd = tmp;
+			await pi.emit("input", { source: "interactive", text: "hello" }, ctx);
+			assert.equal(called, true);
+			assert.deepEqual(pi.setLevelCalls, ["low"]);
+		});
+	}
+
+	it("logs actual provider failures without changing thinking or leaking the key", {
+		timeout: 2000,
+	}, async () => {
+		const key = "test-private-api-key";
+		__setCompleteSimple(async () => ({
+			content: [],
+			stopReason: "error",
+			errorMessage: `Unsupported parameter: temperature; key=${key}`,
+		}));
+		const pi = buildFakePi();
+		ext(pi as unknown as ExtensionAPI);
+		pi.setThinkingLevel("high");
+		pi.setLevelCalls.length = 0;
+		const ctx = buildFakeCtx({ apiKey: key });
+		ctx.cwd = tmp;
+		const logged = once(getLogger(), "data");
+		await pi.emit(
+			"input",
+			{ source: "interactive", text: "private user text" },
+			ctx,
+		);
+		const [record] = await logged;
+		assert.deepEqual(pi.setLevelCalls, []);
+		assert.equal(record.message, "kept");
+		assert.equal(record.thinkingBefore, "high");
+		assert.equal(record.thinkingAfter, "high");
+		assert.equal(record.stopReason, "error");
+		assert.match(record.reason, /Unsupported parameter: temperature/);
+		assert.equal(record.providerError, record.reason);
+		const serialized = record[Symbol.for("message")];
+		assert.ok(!serialized.includes(key));
+		assert.ok(!serialized.includes("private user text"));
+	});
+
+	for (const verdict of ["low", "keep"]) {
+		it(`logs session correlation, token usage and before/after levels for ${verdict}`, {
+			timeout: 2000,
+		}, async () => {
+			const usage = { input: 100, output: 1, totalTokens: 101 };
+			__setCompleteSimple(async () => ({
+				content: [{ type: "text", text: verdict }],
+				stopReason: "stop",
+				usage,
+			}));
+			const pi = buildFakePi();
+			ext(pi as unknown as ExtensionAPI);
+			pi.setThinkingLevel("high");
+			pi.setLevelCalls.length = 0;
+			const ctx = buildFakeCtx({ model: { provider: "fake", id: "main" } });
+			ctx.cwd = tmp;
+			const logged = once(getLogger(), "data");
+			await pi.emit(
+				"input",
+				{ source: "interactive", text: "private user text" },
+				ctx,
+			);
+			const [record] = await logged;
+			assert.equal(record.sessionId, ctx.sessionManager.getSessionId());
+			assert.equal(record.sessionFile, ctx.sessionManager.getSessionFile());
+			assert.equal(record.parentEntryId, ctx.sessionManager.getLeafId());
+			assert.equal(record.source, "interactive");
+			assert.equal(record.hasUI, false);
+			assert.equal(record.mainModel, "fake/main");
+			assert.equal(record.classifier, "fake/classifier");
+			assert.equal(record.thinkingBefore, "high");
+			assert.equal(record.thinkingAfter, verdict === "keep" ? "high" : "low");
+			assert.equal(record.verdict, verdict);
+			assert.deepEqual(record.usage, usage);
+			assert.equal(record.stopReason, "stop");
+			assert.deepEqual(pi.setLevelCalls, verdict === "keep" ? [] : ["low"]);
+			assert.ok(!record[Symbol.for("message")].includes("private user text"));
+		});
+	}
+
+	it("logs skipped RPC requests without classifying or changing thinking", {
+		timeout: 2000,
+	}, async () => {
+		let called = false;
+		__setCompleteSimple(async () => {
+			called = true;
+			return { content: [{ type: "text", text: "low" }] };
+		});
+		const pi = buildFakePi();
+		ext(pi as unknown as ExtensionAPI);
+		const ctx = buildFakeCtx();
+		ctx.cwd = tmp;
+		const logged = once(getLogger(), "data");
+		const result = await pi.emit(
+			"input",
+			{ source: "rpc", text: "private user text" },
+			ctx,
+		);
+		const [record] = await logged;
+		assert.equal(called, false);
+		assert.deepEqual(pi.setLevelCalls, []);
+		assert.deepEqual(result, { action: "continue" });
+		assert.equal(record.message, "skipped");
+		assert.equal(record.reason, "non-interactive");
+		assert.equal(record.source, "rpc");
+		assert.ok(!record[Symbol.for("message")].includes("private user text"));
 	});
 
 	it("ignores non-interactive turns", async () => {

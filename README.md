@@ -88,6 +88,19 @@ Decision/fallback events are written to rolling log files:
 
 Rotation: daily, max 5 MB per file, keep 14 days.
 
+## Local trial changes
+
+This local checkout retains the 0.1.2 classification prompt, parser, bounds,
+timeout, and input eligibility. It omits `temperature` only for the
+`openai-codex-responses` API, which rejects that parameter.
+
+Decision logs additionally include session/file/parent-entry identifiers, input
+source, UI presence, main and classifier models, thinking before/after, classifier
+usage, stop reason, and provider errors. Skipped inputs are logged with their
+reason so an unused extension can be distinguished from an ineligible input.
+The resolved classifier API key is redacted from provider error messages. Prompt
+bodies and classifier reasoning are not added to these records.
+
 ## Tests
 
 Node-native (`node:test`), no framework. Requires Node ≥22.6 (unit) / ≥22.7 (integration).
