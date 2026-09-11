@@ -9,7 +9,7 @@ A [pi](https://pi.dev) extension that auto-sets the thinking level each turn via
 an **online prompt-difficulty classifier**. The idea is borrowed from
 [oh-my-pi](https://github.com/can1357/oh-my-pi)'s `auto` thinking level.
 
-Each interactive turn, before the agent runs, a small **classifier model** rates
+Each interactive or RPC turn, before the agent runs, a small **classifier model** rates
 the prompt `low | medium | high | xhigh`, clamps it into your configured bounds,
 and sets the thinking level for that turn. Trivial prompts stay cheap; hard ones
 get reasoning budget. Short continuations (`continue`, `yes`, `ok`) return `keep`
@@ -51,8 +51,9 @@ Check that Luna is available with `pi --list-models luna`. Without a configured
 classifier, the extension is inactive. The omitted settings retain the upstream
 defaults below. Other classifiers can be selected with their `provider/model` ID.
 
-The Codex/Luna configuration was verified with pi 0.85.1. Upstream input eligibility
-is unchanged: RPC inputs and streaming follow-ups are skipped.
+The Codex/Luna configuration was verified with pi 0.85.1. Normal RPC inputs
+(including Slack bridge messages) are classified. Streaming follow-ups and
+extension-generated inputs are skipped.
 
 | field             | default   | notes                                                 |
 | ----------------- | --------- | ---------------------------------------------------- |
@@ -87,7 +88,8 @@ Rotation: daily, max 5 MB per file, keep 14 days.
 ## Local trial changes
 
 This local checkout retains the 0.1.2 classification prompt, parser, bounds,
-timeout, and input eligibility. It omits `temperature` only for the
+and timeout. It also classifies normal RPC inputs, while retaining the streaming
+and extension-input exclusions. It omits `temperature` only for the
 `openai-codex-responses` API, which rejects that parameter.
 
 Decision logs additionally include session/file/parent-entry identifiers, input

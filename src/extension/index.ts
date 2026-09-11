@@ -342,12 +342,13 @@ export default function (pi: ExtensionAPI) {
 			classifier: cfg.classifier,
 			thinkingBefore: pi.getThinkingLevel(),
 		};
-		// Keep the upstream eligibility rules; log skips to measure actual coverage.
+		// Log skips to measure actual coverage.
 		const skip = (reason: string) => {
 			logger().info("skipped", { ...metadata, reason });
 			return { action: "continue" as const };
 		};
-		if (event.source !== "interactive") return skip("non-interactive");
+		if (event.source !== "interactive" && event.source !== "rpc")
+			return skip("non-interactive");
 		if (event.streamingBehavior) return skip("streaming");
 		if (!active()) return skip("disabled-or-unconfigured");
 		if (!ctx.model || getSupportedThinkingLevels(ctx.model).length <= 1)

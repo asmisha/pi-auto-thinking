@@ -76,23 +76,28 @@ describe("classify (happy path)", () => {
 		assert.deepEqual(pi.setLevelCalls, []);
 	});
 
-	it("falls back (keeps level) when completeSimple rejects", async () => {
-		__setCompleteSimple(async () => {
-			throw new Error("boom");
+	for (const source of ["interactive", "rpc"] as const) {
+		it(`falls back (keeps level) when completeSimple rejects for ${source}`, async () => {
+			let called = false;
+			__setCompleteSimple(async () => {
+				called = true;
+				throw new Error("boom");
+			});
+			const pi = buildFakePi();
+			ext(pi as unknown as ExtensionAPI);
+			pi.setThinkingLevel("low");
+			pi.setLevelCalls.length = 0;
+			const ctx = buildFakeCtx({ model: { id: "fake/main" } });
+			ctx.cwd = tmp;
+			await pi.emit(
+				"input",
+				{ source, text: "anything", streamingBehavior: undefined },
+				ctx,
+			);
+			assert.equal(called, true);
+			assert.deepEqual(pi.setLevelCalls, []);
 		});
-		const pi = buildFakePi();
-		ext(pi as unknown as ExtensionAPI);
-		pi.setThinkingLevel("low");
-		pi.setLevelCalls.length = 0;
-		const ctx = buildFakeCtx({ model: { id: "fake/main" } });
-		ctx.cwd = tmp;
-		await pi.emit(
-			"input",
-			{ source: "interactive", text: "anything", streamingBehavior: undefined },
-			ctx,
-		);
-		assert.deepEqual(pi.setLevelCalls, []);
-	});
+	}
 
 	it("skips classify when the model supports only off", async () => {
 		let called = false;
@@ -170,47 +175,45 @@ describe("classify (happy path)", () => {
 		assert.ok(!serialized.includes("private user text"));
 	});
 
-	for (const verdict of ["low", "keep"]) {
-		it(`logs session correlation, token usage and before/after levels for ${verdict}`, {
-			timeout: 2000,
-		}, async () => {
-			const usage = { input: 100, output: 1, totalTokens: 101 };
-			__setCompleteSimple(async () => ({
-				content: [{ type: "text", text: verdict }],
-				stopReason: "stop",
-				usage,
-			}));
-			const pi = buildFakePi();
-			ext(pi as unknown as ExtensionAPI);
-			pi.setThinkingLevel("high");
-			pi.setLevelCalls.length = 0;
-			const ctx = buildFakeCtx({ model: { provider: "fake", id: "main" } });
-			ctx.cwd = tmp;
-			const logged = once(getLogger(), "data");
-			await pi.emit(
-				"input",
-				{ source: "interactive", text: "private user text" },
-				ctx,
-			);
-			const [record] = await logged;
-			assert.equal(record.sessionId, ctx.sessionManager.getSessionId());
-			assert.equal(record.sessionFile, ctx.sessionManager.getSessionFile());
-			assert.equal(record.parentEntryId, ctx.sessionManager.getLeafId());
-			assert.equal(record.source, "interactive");
-			assert.equal(record.hasUI, false);
-			assert.equal(record.mainModel, "fake/main");
-			assert.equal(record.classifier, "fake/classifier");
-			assert.equal(record.thinkingBefore, "high");
-			assert.equal(record.thinkingAfter, verdict === "keep" ? "high" : "low");
-			assert.equal(record.verdict, verdict);
-			assert.deepEqual(record.usage, usage);
-			assert.equal(record.stopReason, "stop");
-			assert.deepEqual(pi.setLevelCalls, verdict === "keep" ? [] : ["low"]);
-			assert.ok(!record[Symbol.for("message")].includes("private user text"));
-		});
+	for (const source of ["interactive", "rpc"] as const) {
+		for (const verdict of ["low", "keep"]) {
+			it(`logs session correlation, token usage and before/after levels for ${source}: ${verdict}`, {
+				timeout: 2000,
+			}, async () => {
+				const usage = { input: 100, output: 1, totalTokens: 101 };
+				__setCompleteSimple(async () => ({
+					content: [{ type: "text", text: verdict }],
+					stopReason: "stop",
+					usage,
+				}));
+				const pi = buildFakePi();
+				ext(pi as unknown as ExtensionAPI);
+				pi.setThinkingLevel("high");
+				pi.setLevelCalls.length = 0;
+				const ctx = buildFakeCtx({ model: { provider: "fake", id: "main" } });
+				ctx.cwd = tmp;
+				const logged = once(getLogger(), "data");
+				await pi.emit("input", { source, text: "private user text" }, ctx);
+				const [record] = await logged;
+				assert.equal(record.sessionId, ctx.sessionManager.getSessionId());
+				assert.equal(record.sessionFile, ctx.sessionManager.getSessionFile());
+				assert.equal(record.parentEntryId, ctx.sessionManager.getLeafId());
+				assert.equal(record.source, source);
+				assert.equal(record.hasUI, false);
+				assert.equal(record.mainModel, "fake/main");
+				assert.equal(record.classifier, "fake/classifier");
+				assert.equal(record.thinkingBefore, "high");
+				assert.equal(record.thinkingAfter, verdict === "keep" ? "high" : "low");
+				assert.equal(record.verdict, verdict);
+				assert.deepEqual(record.usage, usage);
+				assert.equal(record.stopReason, "stop");
+				assert.deepEqual(pi.setLevelCalls, verdict === "keep" ? [] : ["low"]);
+				assert.ok(!record[Symbol.for("message")].includes("private user text"));
+			});
+		}
 	}
 
-	it("logs skipped RPC requests without classifying or changing thinking", {
+	it("logs skipped extension inputs without classifying or changing thinking", {
 		timeout: 2000,
 	}, async () => {
 		let called = false;
@@ -225,7 +228,7 @@ describe("classify (happy path)", () => {
 		const logged = once(getLogger(), "data");
 		const result = await pi.emit(
 			"input",
-			{ source: "rpc", text: "private user text" },
+			{ source: "extension", text: "private user text" },
 			ctx,
 		);
 		const [record] = await logged;
@@ -234,43 +237,26 @@ describe("classify (happy path)", () => {
 		assert.deepEqual(result, { action: "continue" });
 		assert.equal(record.message, "skipped");
 		assert.equal(record.reason, "non-interactive");
-		assert.equal(record.source, "rpc");
+		assert.equal(record.source, "extension");
 		assert.ok(!record[Symbol.for("message")].includes("private user text"));
 	});
 
-	it("ignores non-interactive turns", async () => {
-		let called = false;
-		__setCompleteSimple(async () => {
-			called = true;
-			return { content: [{ type: "text", text: "low" }] };
-		});
-		const pi = buildFakePi();
-		ext(pi as unknown as ExtensionAPI);
-		const ctx = buildFakeCtx({ model: { id: "fake/main" } });
-		ctx.cwd = tmp;
-		await pi.emit(
-			"input",
-			{ source: "steer", text: "x", streamingBehavior: undefined },
-			ctx,
-		);
-		assert.equal(called, false);
-	});
-
-	it("ignores streaming follow-ups (streamingBehavior set)", async () => {
-		let called = false;
-		__setCompleteSimple(async () => {
-			called = true;
-			return { content: [{ type: "text", text: "low" }] };
-		});
-		const pi = buildFakePi();
-		ext(pi as unknown as ExtensionAPI);
-		const ctx = buildFakeCtx({ model: { id: "fake/main" } });
-		ctx.cwd = tmp;
-		await pi.emit(
-			"input",
-			{ source: "interactive", text: "x", streamingBehavior: "append" },
-			ctx,
-		);
-		assert.equal(called, false);
-	});
+	for (const source of ["interactive", "rpc"] as const) {
+		for (const streamingBehavior of ["steer", "followUp"] as const) {
+			it(`ignores ${source} streaming ${streamingBehavior} inputs`, async () => {
+				let called = false;
+				__setCompleteSimple(async () => {
+					called = true;
+					return { content: [{ type: "text", text: "low" }] };
+				});
+				const pi = buildFakePi();
+				ext(pi as unknown as ExtensionAPI);
+				const ctx = buildFakeCtx({ model: { id: "fake/main" } });
+				ctx.cwd = tmp;
+				await pi.emit("input", { source, text: "x", streamingBehavior }, ctx);
+				assert.equal(called, false);
+				assert.deepEqual(pi.setLevelCalls, []);
+			});
+		}
+	}
 });
