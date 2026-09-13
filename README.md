@@ -55,6 +55,13 @@ The Codex/Luna configuration was verified with pi 0.85.1. Normal RPC inputs
 (including Slack bridge messages) are classified. Streaming follow-ups and
 extension-generated inputs are skipped.
 
+In dynamic-workflow subagents, auto-thinking is disabled: it makes no classifier
+call and leaves the workflow's thinking level unchanged, even after
+`/auto-thinking on`. This requires a workflow runner that sets the session-local
+`pi-dynamic-workflows-subagent` extension flag before binding extensions.
+Normal interactive and RPC sessions still classify; headless mode alone does
+not disable the extension.
+
 | field             | default   | notes                                                 |
 | ----------------- | --------- | ---------------------------------------------------- |
 | `enabled`         | `true`    | Master switch. `false` disables the classifier.      |

@@ -38,6 +38,44 @@ describe("classify (happy path)", () => {
 		rmSync(tmp, { recursive: true, force: true });
 	});
 
+	for (const source of ["interactive", "rpc"] as const) {
+		for (const subagent of [undefined, false, true]) {
+			it(`${source} classification respects the workflow marker (${subagent}) after startup and on`, async () => {
+				let calls = 0;
+				__setCompleteSimple(async () => {
+					calls++;
+					return { content: [{ type: "text", text: "low" }] };
+				});
+				const pi = buildFakePi();
+				ext(pi as unknown as ExtensionAPI);
+				// The workflow runner sets this session-local flag after loading
+				// extensions, before binding their session_start handlers.
+				if (subagent !== undefined) {
+					pi.flagValues.set("pi-dynamic-workflows-subagent", subagent);
+				}
+				pi.setThinkingLevel("xhigh");
+				pi.setLevelCalls.length = 0;
+				const ctx = buildFakeCtx();
+				ctx.cwd = tmp;
+				const notifications: string[] = [];
+				ctx.ui.notify = (message: string) => notifications.push(message);
+				await pi.emit("session_start", {}, ctx);
+				await pi.emit("input", { source, text: "hello" }, ctx);
+				await pi.commands.get("auto-thinking").handler("on", ctx);
+				await pi.emit("input", { source, text: "hello again" }, ctx);
+
+				assert.equal(calls, subagent ? 0 : 2);
+				assert.equal(pi.level, subagent ? "xhigh" : "low");
+				assert.deepEqual(pi.setLevelCalls, subagent ? [] : ["low", "low"]);
+				assert.ok(
+					notifications[0].includes(
+						`auto-thinking: ${subagent ? "off" : "on"}`,
+					),
+				);
+			});
+		}
+	}
+
 	it("sets the classified level on a verdict", async () => {
 		__setCompleteSimple(async () => ({
 			content: [{ type: "text", text: "high" }],

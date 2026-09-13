@@ -7,6 +7,9 @@ export interface FakePi {
 		name: string,
 		spec: { description: string; handler: AnyFn },
 	): void;
+	registerFlag(name: string, options: { default?: boolean | string }): void;
+	getFlag(name: string): boolean | string | undefined;
+	flagValues: Map<string, boolean | string>;
 	getThinkingLevel(): string;
 	setThinkingLevel(level: string): void;
 	emit(event: string, e: unknown, ctx: unknown): Promise<unknown>;
@@ -19,6 +22,8 @@ export function buildFakePi(): FakePi {
 	const handlers = new Map<string, AnyFn>();
 	const commands = new Map<string, { description: string; handler: AnyFn }>();
 	const setLevelCalls: string[] = [];
+	const registeredFlags = new Set<string>();
+	const flagValues = new Map<string, boolean | string>();
 	let level = "off";
 	const pi: FakePi = {
 		on: (event, fn) => {
@@ -27,6 +32,15 @@ export function buildFakePi(): FakePi {
 		registerCommand: (name, spec) => {
 			commands.set(name, spec);
 		},
+		registerFlag: (name, options) => {
+			registeredFlags.add(name);
+			if (options.default !== undefined && !flagValues.has(name)) {
+				flagValues.set(name, options.default);
+			}
+		},
+		getFlag: (name) =>
+			registeredFlags.has(name) ? flagValues.get(name) : undefined,
+		flagValues,
 		getThinkingLevel: () => level,
 		setThinkingLevel: (l) => {
 			setLevelCalls.push(l);
