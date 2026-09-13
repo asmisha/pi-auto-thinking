@@ -73,6 +73,13 @@ interface ClassifyResult {
 }
 
 export default function (pi: ExtensionAPI) {
+	pi.registerFlag("pi-dynamic-workflows-subagent", {
+		description: "Session is managed by pi-dynamic-workflows",
+		type: "boolean",
+		default: false,
+	});
+	const workflowSubagent = () =>
+		pi.getFlag("pi-dynamic-workflows-subagent") === true;
 	let cfg = readConfig<Config>(DEFAULTS, process.cwd());
 	let userEnabled = cfg.enabled !== false;
 	let last: Decision | undefined;
@@ -81,7 +88,7 @@ export default function (pi: ExtensionAPI) {
 	let log: ReturnType<typeof getLogger> | undefined;
 	const logger = () => (log ??= getLogger());
 
-	const active = () => userEnabled && !!cfg.classifier;
+	const active = () => !workflowSubagent() && userEnabled && !!cfg.classifier;
 
 	// Animated widget spinner. pi's built-in working indicator is gated on the
 	// agent's streaming state (session.isStreaming), which is false during the
@@ -347,6 +354,7 @@ export default function (pi: ExtensionAPI) {
 			logger().info("skipped", { ...metadata, reason });
 			return { action: "continue" as const };
 		};
+		if (workflowSubagent()) return skip("workflow-subagent");
 		if (event.source !== "interactive" && event.source !== "rpc")
 			return skip("non-interactive");
 		if (event.streamingBehavior) return skip("streaming");
